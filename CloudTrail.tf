@@ -114,10 +114,52 @@ resource "aws_s3_bucket_policy" "CloudtrailS3" {
   })
 }
 
+resource "aws_kms_key" "key" {
+  description = "KMS key for cloudtrailEvents"
+  key_usage = "ENCRYPT_DECRYPT"
+  enable_key_rotation = true
+}
+
+resource "aws_kms_key_policy" "example" {
+  key_id = aws_kms_key.key.id
+  policy = jsonencode({
+    Id = "kms_key_policyfor_cloudtrail"
+    Statement = [
+      {
+        Action = "kms:*"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Resource = "*"
+        Sid      = "Enable IAM User Permissions"
+      },
+      {
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+          }
+        Resource = "*"
+        Sid      = "Enable AWS Service Permission"
+      },      
+    ]
+    Version = "2012-10-17"
+  })
+}
+
+resource "aws_kms_alias" "key_name" {
+  name          = "alias/cloudtrailevent"
+  target_key_id = aws_kms_key.key.key_id
+}
+
 #creating SNS Topic
 resource "aws_sns_topic" "cloudtrail_notifications" {
   name              = "Cloudtrail_Events"
-  kms_master_key_id = "alias/aws/sns"
+  kms_master_key_id = aws_kms_key.key.key_id
 }
 #creating SNS Subscription
 resource "aws_sns_topic_subscription" "cloudtrail_notifications_sub" {
@@ -144,13 +186,13 @@ resource "aws_cloudwatch_log_metric_filter" "AWSConsoleSignInFailure" {
 resource "aws_cloudwatch_metric_alarm" "AWSConsoleSignInFailureAlarm" {
   alarm_name          = "AWSConsoleSignInFailure-AccountID-${data.aws_caller_identity.current.account_id}"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 5
+  evaluation_periods  = 1
   metric_name         = "ConsoleSigninFailureCount"
   namespace           = "CloudTrailMetrics"
   period              = 60
   statistic           = "Average"
   unit                = "Count"
-  threshold           = 0
+  threshold           = 5
   alarm_description   = "P2 changes to NACL detected."
   alarm_actions       = [aws_sns_topic.cloudtrail_notifications.arn]
   treat_missing_data  = "notBreaching"
